@@ -112,10 +112,15 @@ typedef boxsize_t MP4D_file_offset_t;
 // Used for private stream, as suggested in http://www.mp4ra.org/handler.html
 #define MP4E_HANDLER_TYPE_GESM                                  0x6765736D
 
-
+#define HEVC_NAL_TRAIL_N 0
+#define HEVC_NAL_TRAIL_R 1
+#define HEVC_NAL_IDR_W_LP 19
+#define HEVC_NAL_IDR_N_LP 20
 #define HEVC_NAL_VPS 32
 #define HEVC_NAL_SPS 33
 #define HEVC_NAL_PPS 34
+#define HEVC_NAL_AUD 35
+#define HEVC_NAL_SEI 39
 #define HEVC_NAL_BLA_W_LP 16
 #define HEVC_NAL_CRA_NUT  21
 
@@ -473,6 +478,20 @@ int MP4E_set_sps(MP4E_mux_t *mux, int track_id, const void *sps, int bytes);
 *   return error code MP4E_STATUS_*
 */
 int MP4E_set_pps(MP4E_mux_t *mux, int track_id, const void *pps, int bytes);
+
+/**
+*   Set SEI data. MUST be used for AVC (H.264) track. Up to 256 different SEI can be used in one track.
+*
+*   return error code MP4E_STATUS_*
+*/
+int MP4E_set_sei(MP4E_mux_t *mux, int track_id, const void *sei, int bytes);
+
+/**
+*   Set AUD data. MUST be used for AVC (H.264) track. Up to 256 different AUD can be used in one track.
+*
+*   return error code MP4E_STATUS_*
+*/
+int MP4E_set_aud(MP4E_mux_t *mux, int track_id, const void *sei, int bytes);
 
 /**
 *   Set or replace ASCII test comment for the file. Set comment to NULL to remove comment.
@@ -928,6 +947,18 @@ int MP4E_set_pps(MP4E_mux_t *mux, int track_id, const void *pps, int bytes)
     track_t* tr = ((track_t*)mux->tracks.data) + track_id;
     assert(tr->info.track_media_kind == e_video);
     return append_mem(&tr->vpps, pps, bytes) ? MP4E_STATUS_OK : MP4E_STATUS_NO_MEMORY;
+}
+
+int MP4E_set_sei(MP4E_mux_t *mux, int track_id, const void *pps, int bytes)
+{
+    // printf("SKIP SEI\n");
+    return 0;
+}
+
+int MP4E_set_aud(MP4E_mux_t *mux, int track_id, const void *pps, int bytes)
+{
+    // printf("SKIP AUD\n");
+    return 0;
 }
 
 static unsigned get_duration(const track_t *tr)
@@ -2280,43 +2311,60 @@ static int mp4_h265_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, in
     int payload_type = (nal[0] >> 1) & 0x3f;
     int is_intra = payload_type >= HEVC_NAL_BLA_W_LP && payload_type <= HEVC_NAL_CRA_NUT;
     int err = MP4E_STATUS_OK;
-    //printf("payload_type=%d, intra=%d\n", payload_type, is_intra);
+    // printf("payload_type=%d, size=%d intra=%d\n", payload_type, sizeof_nal, is_intra);
+    static int is_new_frame = 0;
+    static int slice_mode_on = 1; //slice mode on
 
-    if (is_intra && !h->need_sps && !h->need_pps && !h->need_vps)
-        h->need_idr = 0;
     switch (payload_type)
     {
-    case HEVC_NAL_VPS:
-        MP4E_set_vps(h->mux, h->mux_track_id, nal, sizeof_nal);
-        h->need_vps = 0;
-        break;
-    case HEVC_NAL_SPS:
-        MP4E_set_sps(h->mux, h->mux_track_id, nal, sizeof_nal);
-        h->need_sps = 0;
-        break;
-    case HEVC_NAL_PPS:
-        MP4E_set_pps(h->mux, h->mux_track_id, nal, sizeof_nal);
-        h->need_pps = 0;
-        break;
-    default:
-        if (h->need_vps || h->need_sps || h->need_pps || h->need_idr)
-            return MP4E_STATUS_BAD_ARGUMENTS;
-        {
-            unsigned char *tmp = (unsigned char *)malloc(4 + sizeof_nal);
-            if (!tmp)
-                return MP4E_STATUS_NO_MEMORY;
-            int sample_kind = MP4E_SAMPLE_DEFAULT;
-            tmp[0] = (unsigned char)(sizeof_nal >> 24);
-            tmp[1] = (unsigned char)(sizeof_nal >> 16);
-            tmp[2] = (unsigned char)(sizeof_nal >>  8);
-            tmp[3] = (unsigned char)(sizeof_nal);
-            memcpy(tmp + 4, nal, sizeof_nal);
-            if (is_intra)
-                sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
-            err = MP4E_put_sample(h->mux, h->mux_track_id, tmp, 4 + sizeof_nal, timeStamp90kHz_next, sample_kind);
-            free(tmp);
-        }
-        break;
+        case HEVC_NAL_VPS:
+            MP4E_set_vps(h->mux, h->mux_track_id, nal, sizeof_nal);
+            break;
+        case HEVC_NAL_SPS:
+            MP4E_set_sps(h->mux, h->mux_track_id, nal, sizeof_nal);
+            break;
+        case HEVC_NAL_PPS:
+            MP4E_set_pps(h->mux, h->mux_track_id, nal, sizeof_nal);
+            break;
+        case HEVC_NAL_SEI:
+            MP4E_set_sei(h->mux, h->mux_track_id, nal, sizeof_nal);
+            break;
+        case HEVC_NAL_AUD:
+            MP4E_set_aud(h->mux, h->mux_track_id, nal, sizeof_nal);
+            is_new_frame=1;
+            break;
+        default:
+            {
+                unsigned char *tmp = (unsigned char *)malloc(4 + sizeof_nal);
+                if (!tmp)
+                    return MP4E_STATUS_NO_MEMORY;
+                int sample_kind = MP4E_SAMPLE_DEFAULT;
+                tmp[0] = (unsigned char)(sizeof_nal >> 24);
+                tmp[1] = (unsigned char)(sizeof_nal >> 16);
+                tmp[2] = (unsigned char)(sizeof_nal >>  8);
+                tmp[3] = (unsigned char)(sizeof_nal);
+                memcpy(tmp + 4, nal, sizeof_nal);
+                if(slice_mode_on) //
+                {
+                    if(is_new_frame)
+                    {
+                        if (is_intra)
+                            sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
+                        is_new_frame=0;
+                    }
+                    else
+                    {
+                        sample_kind = MP4E_SAMPLE_CONTINUATION;
+                    }
+                }
+                else
+                    if (is_intra)
+                        sample_kind = MP4E_SAMPLE_RANDOM_ACCESS;
+
+                err = MP4E_put_sample(h->mux, h->mux_track_id, tmp, 4 + sizeof_nal, timeStamp90kHz_next, sample_kind);
+                free(tmp);
+            }
+            break;
     }
     return err;
 }

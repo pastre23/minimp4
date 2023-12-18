@@ -6,3 +6,4 @@ video_samples
 *.gcda
 *.gcno
 *.gcov
+*.h265

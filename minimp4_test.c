@@ -118,7 +118,7 @@ int main(int argc, char **argv)
     MP4E_mux_t *mux;
     mp4_h26x_writer_t mp4wr;
     mux = MP4E_open(sequential_mode, fragmentation_mode, fout, write_callback);
-    if (MP4E_STATUS_OK != mp4_h26x_write_init(&mp4wr, mux, 352, 288, is_hevc))
+    if (MP4E_STATUS_OK != mp4_h26x_write_init(&mp4wr, mux, 1920, 1080, is_hevc))
     {
         printf("error: mp4_h26x_write_init failed\n");
         exit(1);
