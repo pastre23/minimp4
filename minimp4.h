@@ -2311,20 +2311,25 @@ static int mp4_h265_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, in
     int payload_type = (nal[0] >> 1) & 0x3f;
     int is_intra = payload_type >= HEVC_NAL_BLA_W_LP && payload_type <= HEVC_NAL_CRA_NUT;
     int err = MP4E_STATUS_OK;
-    // printf("payload_type=%d, size=%d intra=%d\n", payload_type, sizeof_nal, is_intra);
+    printf("payload_type=%d, size=%d intra=%d\n", payload_type, sizeof_nal, is_intra);
     static int is_new_frame = 0;
     static int slice_mode_on = 1; //slice mode on
 
+    if (is_intra && !h->need_sps && !h->need_pps && !h->need_vps)
+        h->need_idr = 0;
     switch (payload_type)
     {
         case HEVC_NAL_VPS:
             MP4E_set_vps(h->mux, h->mux_track_id, nal, sizeof_nal);
+            h->need_vps = 0;
             break;
         case HEVC_NAL_SPS:
             MP4E_set_sps(h->mux, h->mux_track_id, nal, sizeof_nal);
+            h->need_sps = 0;
             break;
         case HEVC_NAL_PPS:
             MP4E_set_pps(h->mux, h->mux_track_id, nal, sizeof_nal);
+            h->need_pps = 0;
             break;
         case HEVC_NAL_SEI:
             MP4E_set_sei(h->mux, h->mux_track_id, nal, sizeof_nal);
@@ -2334,6 +2339,8 @@ static int mp4_h265_write_nal(mp4_h26x_writer_t *h, const unsigned char *nal, in
             is_new_frame=1;
             break;
         default:
+            if (h->need_vps || h->need_sps || h->need_pps || h->need_idr)
+                return MP4E_STATUS_BAD_ARGUMENTS;
             {
                 unsigned char *tmp = (unsigned char *)malloc(4 + sizeof_nal);
                 if (!tmp)
